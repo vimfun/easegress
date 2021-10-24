@@ -72,24 +72,24 @@ func (s *Server) initMetadata() {
 
 }
 
-func (s *Server) metadataAPIEntries() []*APIEntry {
-	return []*APIEntry{
-		&APIEntry{
+func (s *Server) metadataAPIEntries() []*Entry {
+	return []*Entry{
+		{
 			Path:    FilterMetaPrefix,
 			Method:  "GET",
 			Handler: s.listFilters,
 		},
-		&APIEntry{
+		{
 			Path:    FilterMetaPrefix + "/{kind}" + "/description",
 			Method:  "GET",
 			Handler: s.getFilterDescription,
 		},
-		&APIEntry{
+		{
 			Path:    FilterMetaPrefix + "/{kind}" + "/schema",
 			Method:  "GET",
 			Handler: s.getFilterSchema,
 		},
-		&APIEntry{
+		{
 			Path:    FilterMetaPrefix + "/{kind}" + "/results",
 			Method:  "GET",
 			Handler: s.getFilterResults,

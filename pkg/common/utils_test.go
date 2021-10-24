@@ -18,299 +18,90 @@
 package common
 
 import (
-	"math"
+	"crypto/rand"
+	"fmt"
+	"io"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
-func TestScanTokensNormally(t *testing.T) {
-	ret, err := ScanTokens(`abcdef`, true, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
+func TestValidateName(t *testing.T) {
+	if err := ValidateName("localhost"); err != nil {
+		t.Errorf("error %v", err)
 	}
-	if ret != `abcdef` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
+	if err := ValidateName("127.0.0.1"); err != nil {
+		t.Errorf("error %v", err)
 	}
-
-	ret, err = ScanTokens(`abc\{def\}ghi`, false, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc\{def\}ghi` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{def\}ghi`, true, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc{def}ghi` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	visitor := func(pos int, token string) (bool, string) {
-		if pos != 13 {
-			t.Fatalf("wrong token position: %d", pos)
-		}
-		if token != `jkl` {
-			t.Fatalf("wrong token: %s", token)
-		}
-
-		return true, `JKL`
-	}
-
-	ret, err = ScanTokens(`abc\{def\}ghi{jkl}`, true, visitor)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc{def}ghiJKL` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{def\}ghi{jkl}`, false, visitor)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc\{def\}ghiJKL` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{def\}ghi{jkl}lmn`, true, visitor)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc{def}ghiJKLlmn` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{def\}ghi{jkl}\{lmn\}`, false, visitor)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc\{def\}ghiJKL\{lmn\}` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	// escape char out of token
-
-	ret, err = ScanTokens(`abc\{def`, true, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc{def` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{def`, false, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc\{def` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{def\{ghi`, true, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc{def{ghi` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\}def`, true, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc}def` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\}def`, false, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc\}def` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\}def\}ghi\{`, true, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc}def}ghi{` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	// escape char in token
-
-	ret, err = ScanTokens(`abc\{defghi{\{jkl\{}`, true, nil)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc{defghi{{jkl{}` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	visitor = func(pos int, token string) (bool, string) {
-		if pos != 11 {
-			t.Fatalf("wrong token position: %d", pos)
-		}
-		if token != `{jkl{` {
-			t.Fatalf("wrong token: %s", token)
-		}
-
-		return true, `\{JKL\}`
-	}
-
-	ret, err = ScanTokens(`abc\{defghi{\{jkl\{}`, true, visitor)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc{defghi{JKL}` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{defghi{\{jkl\{}`, false, visitor)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `abc\{defghi\{JKL\}` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	visitor = func(_ int, token string) (bool, string) {
-		if token != `hello` {
-			t.Fatalf("wrong token: %s", token)
-		}
-
-		return true, `world`
-	}
-
-	ret, err = ScanTokens(`\{hello\} - {hello}`, true, visitor)
-	if err != nil {
-		t.Fatalf("unexpected error")
-	}
-	if ret != `{hello} - world` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
+	if err := ValidateName("local:host"); err == nil {
+		t.Errorf("error")
 	}
 }
 
-func TestScanTokensExceptionally(t *testing.T) {
-	ret, err := ScanTokens(`abc{def`, true, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
-	}
-	if ret != `abc{def` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
+func uuid() (string, error) {
+	uuid := make([]byte, 16)
+	n, err := io.ReadFull(rand.Reader, uuid)
+	if n != len(uuid) || err != nil {
+		return "", err
 	}
 
-	ret, err = ScanTokens(`abc}def`, true, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
-	}
-	if ret != `abc}def` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
+	uuid[8] = uuid[8]&^0xc0 | 0x80
+	uuid[6] = uuid[6]&^0xf0 | 0x40
+
+	return fmt.Sprintf("%x-%x-%x-%x-%x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:]), nil
+}
+
+func TestDirFunc(t *testing.T) {
+	uuid, err := uuid()
+	if err != nil {
+		t.Errorf("%v", err)
 	}
 
-	ret, err = ScanTokens(`abc\{def{ghi`, false, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
+	dir := "/tmp/egress/" + uuid
+	if err := MkdirAll(dir); err != nil {
+		t.Errorf("%v", err)
 	}
-	if ret != `abc\{def{ghi` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
+	if !IsDirEmpty(dir) {
+		t.Errorf("directory is not empty")
 	}
-
-	ret, err = ScanTokens(`abc\{def}ghi`, true, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
+	if err := BackupAndCleanDir(dir); err != nil {
+		t.Errorf("%v", err)
 	}
-	if ret != `abc\{def}ghi` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
+	if err := RemoveAll(dir); err != nil {
+		t.Errorf("%v", err)
 	}
-
-	ret, err = ScanTokens(`abc}def}ghi`, true, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
-	}
-	if ret != `abc}def}ghi` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
+	if err := RemoveAll(dir + "_bak"); err != nil {
+		t.Errorf("%v", err)
 	}
 
-	ret, err = ScanTokens(`abc{def{ghi`, true, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
-	}
-	if ret != `abc{def{ghi` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
+}
 
-	ret, err = ScanTokens(`abc\}def\{ghi{`, false, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
-	}
-	if ret != `abc\}def\{ghi{` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{def\}ghi}`, true, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
-	}
-	if ret != `abc\{def\}ghi}` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
-	}
-
-	ret, err = ScanTokens(`abc\{def\}{\{ghi\{{jkl}}`, true, nil)
-	if err == nil {
-		t.Fatalf("expected error unraied")
-	}
-	if ret != `abc\{def\}{\{ghi\{{jkl}}` {
-		t.Fatalf("scan token returns wrong result: %s", ret)
+func TestIsDirEmpty(t *testing.T) {
+	name, _ := uuid()
+	if flag := IsDirEmpty(name); !flag {
+		t.Errorf("not exist dir is empty")
 	}
 }
 
-func TestNextNumberPowerOf2(t *testing.T) {
-	ret := NextNumberPowerOf2(0)
-	if ret != 0 {
-		t.Fatalf("unexpected return: %d", ret)
+func TestExpandDir(t *testing.T) {
+	if !filepath.IsAbs(ExpandDir("testExpandDir")) {
+		t.Errorf("should return abs path")
 	}
+}
 
-	ret = NextNumberPowerOf2(1)
-	if ret != 1 {
-		t.Fatalf("unexpected return: %d", ret)
+func TestBackupAndCleanDir(t *testing.T) {
+	if BackupAndCleanDir("notexistdir") != nil {
+		t.Errorf("nil for not exist dir")
 	}
+}
 
-	ret = NextNumberPowerOf2(2)
-	if ret != 2 {
-		t.Fatalf("unexpected return: %d", ret)
-	}
-
-	ret = NextNumberPowerOf2(8)
-	if ret != 8 {
-		t.Fatalf("unexpected return: %d", ret)
-	}
-
-	ret = NextNumberPowerOf2(1023)
-	if ret != 1024 {
-		t.Fatalf("unexpected return: %d", ret)
-	}
-
-	ret = NextNumberPowerOf2(math.MaxUint32)
-	if ret != math.MaxUint32+1 {
-		t.Fatalf("unexpected return: %d", ret)
-	}
-
-	ret = NextNumberPowerOf2(math.MaxUint32 + 1)
-	if ret != math.MaxUint32+1 {
-		t.Fatalf("unexpected return: %d", ret)
-	}
-
-	ret = NextNumberPowerOf2(1<<63 - 1)
-	if ret != 1<<63 {
-		t.Fatalf("unexpected return: %d", ret)
-	}
-
-	ret = NextNumberPowerOf2(1 << 63)
-	if ret != 1<<63 {
-		t.Fatalf("unexpected return: %d", ret)
+func TestNormalizeZapLogPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		for i := 0; i < 10; i++ {
+			name, _ := uuid()
+			if NormalizeZapLogPath(name) != name {
+				t.Errorf("for non-windows should return same result")
+			}
+		}
 	}
 }

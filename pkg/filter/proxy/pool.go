@@ -28,6 +28,7 @@ import (
 
 	"github.com/megaease/easegress/pkg/context"
 	"github.com/megaease/easegress/pkg/logger"
+	"github.com/megaease/easegress/pkg/supervisor"
 	"github.com/megaease/easegress/pkg/tracing"
 	"github.com/megaease/easegress/pkg/util/callbackreader"
 	"github.com/megaease/easegress/pkg/util/httpfilter"
@@ -96,7 +97,7 @@ func (s PoolSpec) Validate() error {
 	return nil
 }
 
-func newPool(spec *PoolSpec, tagPrefix string,
+func newPool(super *supervisor.Supervisor, spec *PoolSpec, tagPrefix string,
 	writeResponse bool, failureCodes []int) *pool {
 
 	var filter *httpfilter.HTTPFilter
@@ -116,7 +117,7 @@ func newPool(spec *PoolSpec, tagPrefix string,
 		writeResponse: writeResponse,
 
 		filter:      filter,
-		servers:     newServers(spec),
+		servers:     newServers(super, spec),
 		httpStat:    httpstat.New(),
 		memoryCache: memoryCache,
 	}
@@ -127,20 +128,24 @@ func (p *pool) status() *PoolStatus {
 	return s
 }
 
-func (p *pool) handle(ctx context.HTTPContext, reqBody io.Reader) string {
-	addTag := func(subPerfix, msg string) {
-		tag := stringtool.Cat(p.tagPrefix, "#", subPerfix, ": ", msg)
+func (p *pool) handle(ctx context.HTTPContext, reqBody io.Reader, client *http.Client) string {
+	addTag := func(subPrefix, msg string) {
+		tag := stringtool.Cat(p.tagPrefix, "#", subPrefix, ": ", msg)
 		ctx.Lock()
 		ctx.AddTag(tag)
 		ctx.Unlock()
 	}
 
-	w := ctx.Response()
+	setStatusCode := func(code int) {
+		ctx.Lock()
+		ctx.Response().SetStatusCode(code)
+		ctx.Unlock()
+	}
 
 	server, err := p.servers.next(ctx)
 	if err != nil {
 		addTag("serverErr", err.Error())
-		w.SetStatusCode(http.StatusServiceUnavailable)
+		setStatusCode(http.StatusServiceUnavailable)
 		return resultInternalError
 	}
 	addTag("addr", server.URL)
@@ -150,11 +155,11 @@ func (p *pool) handle(ctx context.HTTPContext, reqBody io.Reader) string {
 		msg := stringtool.Cat("prepare request failed: ", err.Error())
 		logger.Errorf("BUG: %s", msg)
 		addTag("bug", msg)
-		w.SetStatusCode(http.StatusInternalServerError)
+		setStatusCode(http.StatusInternalServerError)
 		return resultInternalError
 	}
 
-	resp, span, err := p.doRequest(ctx, req)
+	resp, span, err := p.doRequest(ctx, req, client)
 	if err != nil {
 		// NOTE: May add option to cancel the tracing if failed here.
 		// ctx.Span().Cancel()
@@ -167,7 +172,7 @@ func (p *pool) handle(ctx context.HTTPContext, reqBody io.Reader) string {
 			return resultClientError
 		}
 
-		w.SetStatusCode(http.StatusServiceUnavailable)
+		setStatusCode(http.StatusServiceUnavailable)
 		return resultServerError
 	}
 
@@ -175,12 +180,14 @@ func (p *pool) handle(ctx context.HTTPContext, reqBody io.Reader) string {
 
 	ctx.Lock()
 	defer ctx.Unlock()
+	// NOTE: The code below can't use addTag and setStatusCode in case of deadlock.
+
 	respBody := p.statRequestResponse(ctx, req, resp, span)
 
 	if p.writeResponse {
-		w.SetStatusCode(resp.StatusCode)
-		w.Header().AddFromStd(resp.Header)
-		w.SetBody(respBody)
+		ctx.Response().SetStatusCode(resp.StatusCode)
+		ctx.Response().Header().AddFromStd(resp.Header)
+		ctx.Response().SetBody(respBody)
 
 		return ""
 	}
@@ -201,7 +208,7 @@ func (p *pool) prepareRequest(ctx context.HTTPContext, server *Server, reqBody i
 	return p.newRequest(ctx, server, reqBody)
 }
 
-func (p *pool) doRequest(ctx context.HTTPContext, req *request) (*http.Response, tracing.Span, error) {
+func (p *pool) doRequest(ctx context.HTTPContext, req *request, client *http.Client) (*http.Response, tracing.Span, error) {
 	req.start()
 
 	spanName := p.spec.SpanName
@@ -212,7 +219,7 @@ func (p *pool) doRequest(ctx context.HTTPContext, req *request) (*http.Response,
 	span := ctx.Span().NewChildWithStart(spanName, req.startTime())
 	span.Tracer().Inject(span.Context(), opentracing.HTTPHeaders, opentracing.HTTPHeadersCarrier(req.std.Header))
 
-	resp, err := globalClient.Do(req.std)
+	resp, err := fnSendRequest(req.std, client)
 	if err != nil {
 		return nil, nil, err
 	}

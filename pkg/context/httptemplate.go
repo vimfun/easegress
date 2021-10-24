@@ -119,9 +119,9 @@ func NewHTTPTemplate(filterBuffs []FilterBuff) (*HTTPTemplate, error) {
 	filterFuncTags := map[string][]string{}
 	// validates the filter's YAML spec for dependency checking
 	// and template format,e.g., if filter1 has a template said '[[filter.filter2.rsp.data]],
-	// but it appears before filter2, then it's an invalidate dependency cause we can't get
+	// but it appears before filter2, then it's an invalidated dependency cause we can't get
 	// the rsp form filter2 in the execution period of filter1. At last it will build up
-	// executing function arrays for every filters.
+	// executing function arrays for every filter.
 	for _, filterBuff := range filterBuffs {
 		e.filtersOrder = append(e.filtersOrder, filterBuff.Name)
 		templatesMap := e.Engine.ExtractRawTemplateRuleMap(string(filterBuff.Buff))
@@ -185,6 +185,9 @@ func NewHTTPTemplateDummy() *HTTPTemplate {
 
 func readBody(body io.Reader, maxBodySize int64) (*bytes.Buffer, error) {
 	buff := bytes.NewBuffer(nil)
+	if body == nil {
+		return buff, nil
+	}
 	written, err := io.CopyN(buff, body, defaultMaxBodySize+1)
 
 	if err != nil && err != io.EOF {

@@ -19,6 +19,7 @@ package httpserver
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"regexp"
@@ -39,6 +40,7 @@ type (
 		CacheSize        uint32        `yaml:"cacheSize" jsonschema:"omitempty"`
 		XForwardedFor    bool          `yaml:"xForwardedFor" jsonschema:"omitempty"`
 		Tracing          *tracing.Spec `yaml:"tracing" jsonschema:"omitempty"`
+		CaCertBase64     string        `yaml:"caCertBase64" jsonschema:"omitempty,format=base64"`
 
 		// Support multiple certs, preserve the certbase64 and keybase64
 		// for backward compatibility
@@ -51,7 +53,7 @@ type (
 		Keys map[string]string `yaml:"keys" jsonschema:"omitempty"`
 
 		IPFilter *ipfilter.Spec `yaml:"ipFilter,omitempty" jsonschema:"omitempty"`
-		Rules    []Rule         `yaml:"rules" jsonschema:"omitempty"`
+		Rules    []*Rule        `yaml:"rules" jsonschema:"omitempty"`
 	}
 
 	// Rule is first level entry of router.
@@ -62,11 +64,11 @@ type (
 		// the original reason is the jsonscheme(genjs) has not support multiple types.
 		// Reference: https://github.com/alecthomas/jsonschema/issues/30
 		// In the future if we have the scenario where we need marshal the field, but omitempty
-		// in the schema, we are suppose to support multuple types on our own.
+		// in the schema, we are suppose to support multiple types on our own.
 		IPFilter   *ipfilter.Spec `yaml:"ipFilter,omitempty" jsonschema:"omitempty"`
 		Host       string         `yaml:"host" jsonschema:"omitempty"`
 		HostRegexp string         `yaml:"hostRegexp" jsonschema:"omitempty,format=regexp"`
-		Paths      []Path         `yaml:"paths" jsonschema:"omitempty"`
+		Paths      []*Path        `yaml:"paths" jsonschema:"omitempty"`
 	}
 
 	// Path is second level entry of router.
@@ -85,10 +87,9 @@ type (
 	// the headers entry will only be checked after a path entry matched. However, the headers entry has a higher priority
 	// than the path entry itself.
 	Header struct {
-		Key     string   `yaml:"key" jsonschema:"required"`
-		Values  []string `yaml:"values,omitempty" jsonschema:"omitempty,uniqueItems=true"`
-		Regexp  string   `yaml:"regexp,omitempty" jsonschema:"omitempty,format=regexp"`
-		Backend string   `yaml:"backend" jsonschema:"required"`
+		Key    string   `yaml:"key" jsonschema:"required"`
+		Values []string `yaml:"values,omitempty" jsonschema:"omitempty,uniqueItems=true"`
+		Regexp string   `yaml:"regexp,omitempty" jsonschema:"omitempty,format=regexp"`
 
 		headerRE *regexp.Regexp
 	}
@@ -101,7 +102,7 @@ func (spec *Spec) Validate() error {
 	}
 
 	if spec.HTTPS {
-		if spec.CertBase64 == "" && spec.KeyBase64 == "" && spec.Certs == nil && spec.Keys == nil {
+		if spec.CertBase64 == "" && spec.KeyBase64 == "" && len(spec.Certs) == 0 && len(spec.Keys) == 0 {
 			return fmt.Errorf("certBase64/keyBase64, certs/keys are both empty when https enabled")
 		}
 		_, err := spec.tlsConfig()
@@ -130,7 +131,7 @@ func (spec *Spec) tlsConfig() (*tls.Config, error) {
 		if secret, exists := spec.Keys[k]; exists {
 			cert, err := tls.X509KeyPair([]byte(v), []byte(secret))
 			if err != nil {
-				return nil, fmt.Errorf("generate x5099 key pair for %s failed: %s ", k, err)
+				return nil, fmt.Errorf("generate x509 key pair for %s failed: %s ", k, err)
 			}
 			certificates = append(certificates, cert)
 		} else {
@@ -142,7 +143,22 @@ func (spec *Spec) tlsConfig() (*tls.Config, error) {
 		return nil, fmt.Errorf("none valid certs and secret")
 	}
 
-	return &tls.Config{Certificates: certificates}, nil
+	tlsConf := &tls.Config{
+		Certificates: certificates,
+	}
+
+	// if caCertBase64 configuration is provided, should enable tls.ClientAuth and
+	// add the root cert
+	if len(spec.CaCertBase64) != 0 {
+		rootCertPem, _ := base64.StdEncoding.DecodeString(spec.CaCertBase64)
+		certPool := x509.NewCertPool()
+		certPool.AppendCertsFromPEM(rootCertPem)
+
+		tlsConf.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConf.ClientCAs = certPool
+	}
+
+	return tlsConf, nil
 }
 
 func (h *Header) initHeaderRoute() {

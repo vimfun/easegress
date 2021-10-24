@@ -18,9 +18,17 @@
 package common
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
+
+func TestNow(t *testing.T) {
+	now := Now()
+	nano := NowUnixNano()
+	duration := Since(now)
+	fmt.Printf("now: %v, unix %v since: %v", now, nano, duration)
+}
 
 func BenchmarkTimeNow(b *testing.B) {
 	for i := 0; i < b.N; i++ {

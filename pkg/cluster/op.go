@@ -20,6 +20,7 @@ package cluster
 import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
 // PutUnderLease stores data under lease.
@@ -167,9 +168,18 @@ func (c *cluster) GetRawPrefix(prefix string) (map[string]*mvccpb.KeyValue, erro
 		return kvs, err
 	}
 
-	for idx, kv := range resp.Kvs {
-		kvs[string(kv.Key)] = resp.Kvs[idx]
+	for _, kv := range resp.Kvs {
+		kvs[string(kv.Key)] = kv
 	}
 
 	return kvs, nil
+}
+
+func (c *cluster) STM(apply func(concurrency.STM) error) error {
+	client, err := c.getClient()
+	if err != nil {
+		return err
+	}
+	_, err = concurrency.NewSTM(client, apply)
+	return err
 }

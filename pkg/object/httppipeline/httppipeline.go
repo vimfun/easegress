@@ -24,13 +24,12 @@ import (
 	"sync"
 	"time"
 
-	yaml "gopkg.in/yaml.v2"
-
 	"github.com/megaease/easegress/pkg/context"
 	"github.com/megaease/easegress/pkg/logger"
 	"github.com/megaease/easegress/pkg/protocol"
 	"github.com/megaease/easegress/pkg/supervisor"
 	"github.com/megaease/easegress/pkg/util/stringtool"
+	"github.com/megaease/easegress/pkg/util/yamltool"
 )
 
 const (
@@ -69,7 +68,7 @@ type (
 	// Spec describes the HTTPPipeline.
 	Spec struct {
 		Flow    []Flow                   `yaml:"flow" jsonschema:"omitempty"`
-		Filters []map[string]interface{} `yaml:"filters" jsonschema:"-"`
+		Filters []map[string]interface{} `yaml:"filters" jsonschema:"required"`
 	}
 
 	// Flow controls the flow of pipeline.
@@ -148,7 +147,7 @@ func (ctx *PipelineContext) log() string {
 }
 
 // context.HTTPContext: *PipelineContext
-var runningContexts sync.Map = sync.Map{}
+var runningContexts = sync.Map{}
 
 func newAndSetPipelineContext(ctx context.HTTPContext) *PipelineContext {
 	pipeCtx := &PipelineContext{}
@@ -179,41 +178,27 @@ func deletePipelineContext(ctx context.HTTPContext) {
 	runningContexts.Delete(ctx)
 }
 
-func marshal(i interface{}) []byte {
-	buff, err := yaml.Marshal(i)
-	if err != nil {
-		panic(fmt.Errorf("marsharl %#v failed: %v", i, err))
-	}
-	return buff
-}
-
-func unmarshal(buff []byte, i interface{}) {
-	err := yaml.Unmarshal(buff, i)
-	if err != nil {
-		panic(fmt.Errorf("unmarshal failed: %v", err))
-	}
-}
-
 func extractFiltersData(config []byte) interface{} {
 	var whole map[string]interface{}
-	unmarshal(config, &whole)
+	yamltool.Unmarshal(config, &whole)
 	return whole["filters"]
 }
 
 func convertToFilterBuffs(obj interface{}) map[string][]byte {
 	var filters []map[string]interface{}
-	unmarshal(marshal(obj), &filters)
+	yamltool.Unmarshal(yamltool.Marshal(obj), &filters)
 
 	rst := make(map[string][]byte)
 	for _, p := range filters {
-		buff := marshal(p)
+		buff := yamltool.Marshal(p)
 		meta := &FilterMetaSpec{}
-		unmarshal(buff, meta)
+		yamltool.Unmarshal(buff, meta)
 		rst[meta.Name] = buff
 	}
 	return rst
 }
 
+// Validate validates the meta information
 func (meta *FilterMetaSpec) Validate() error {
 	if len(meta.Name) == 0 {
 		return fmt.Errorf("filter name is required")
@@ -230,7 +215,7 @@ func (meta *FilterMetaSpec) Validate() error {
 }
 
 // Validate validates Spec.
-func (s Spec) Validate(config []byte) (err error) {
+func (s Spec) Validate() (err error) {
 	errPrefix := "filters"
 	defer func() {
 		if r := recover(); r != nil {
@@ -238,9 +223,11 @@ func (s Spec) Validate(config []byte) (err error) {
 		}
 	}()
 
+	config := yamltool.Marshal(s)
+
 	filtersData := extractFiltersData(config)
 	if filtersData == nil {
-		return fmt.Errorf("validate failed: filters is required")
+		return fmt.Errorf("filters is required")
 	}
 	filterBuffs := convertToFilterBuffs(filtersData)
 
@@ -318,7 +305,7 @@ func (hp *HTTPPipeline) DefaultSpec() interface{} {
 	return &Spec{}
 }
 
-// Init initilizes HTTPPipeline.
+// Init initializes HTTPPipeline.
 func (hp *HTTPPipeline) Init(superSpec *supervisor.Spec, muxMapper protocol.MuxMapper) {
 	hp.superSpec, hp.spec, hp.muxMapper = superSpec, superSpec.ObjectSpec().(*Spec), muxMapper
 
@@ -372,6 +359,7 @@ func (hp *HTTPPipeline) reload(previousGeneration *HTTPPipeline) {
 		}
 	}
 
+	pipelineName := hp.superSpec.Name()
 	var filterBuffs []context.FilterBuff
 	for _, runningFilter := range runningFilters {
 		name, kind := runningFilter.spec.Name(), runningFilter.spec.Kind()
@@ -389,6 +377,7 @@ func (hp *HTTPPipeline) reload(previousGeneration *HTTPPipeline) {
 		}
 
 		filter := reflect.New(reflect.TypeOf(rootFilter).Elem()).Interface().(Filter)
+		runningFilter.spec.meta.Pipeline = pipelineName
 		if prevInstance == nil {
 			filter.Init(runningFilter.spec)
 		} else {
@@ -447,6 +436,7 @@ func (hp *HTTPPipeline) getNextFilterIndex(index int, result string) int {
 	return -1
 }
 
+// Handle is the handler to deal with HTTP
 func (hp *HTTPPipeline) Handle(ctx context.HTTPContext) {
 	pipeCtx := newAndSetPipelineContext(ctx)
 	defer deletePipelineContext(ctx)
@@ -456,6 +446,18 @@ func (hp *HTTPPipeline) Handle(ctx context.HTTPContext) {
 	filterStat := &FilterStat{}
 
 	handle := func(lastResult string) string {
+		// For saving the `filterIndex`'s filter generated HTTP Response.
+		// Note: the sequence of pipeline is stack-liked, we save the filter's response into template
+		// at the beginning of the next filter.
+		if filterIndex != -1 {
+			name := hp.runningFilters[filterIndex].spec.Name()
+			if err := ctx.SaveRspToTemplate(name); err != nil {
+				format := "save http rsp failed, dict is %#v err is %v"
+				logger.Errorf(format, ctx.Template().GetDict(), err)
+			}
+			logger.Debugf("filter %s, saved response dict %v", name, ctx.Template().GetDict())
+		}
+
 		// Filters are called recursively as a stack, so we need to save current
 		// state and restore it before return
 		lastIndex := filterIndex
@@ -480,6 +482,7 @@ func (hp *HTTPPipeline) Handle(ctx context.HTTPContext) {
 			logger.Errorf(format, ctx.Template().GetDict(), err)
 		}
 
+		logger.Debugf("filter %s saved request dict %v", name, ctx.Template().GetDict())
 		filterStat = &FilterStat{Name: name, Kind: filter.spec.Kind()}
 
 		startTime := time.Now()
@@ -487,11 +490,6 @@ func (hp *HTTPPipeline) Handle(ctx context.HTTPContext) {
 
 		filterStat.Duration = time.Since(startTime)
 		filterStat.Result = result
-
-		if err := ctx.SaveRspToTemplate(name); err != nil {
-			format := "save http rsp failed, dict is %#v err is %v"
-			logger.Errorf(format, ctx.Template().GetDict(), err)
-		}
 
 		lastStat.Next = append(lastStat.Next, filterStat)
 		return result

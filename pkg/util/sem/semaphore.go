@@ -17,69 +17,79 @@
 
 package sem
 
-import "sync"
+import (
+	"context"
+	"sync"
 
-const capacity = 2000000
+	"golang.org/x/sync/semaphore"
+)
 
+const maxCapacity int64 = 20_000_000
+
+//Semaphore supports to change the max sema amount at runtime.
+//  Semaphore employs golang.org/x/sync/semaphore.Weighted with a maxCapacity.
+//  And tuning the realCapacity by an Acquire and Release in the background.
+//  the realCapacity can not exceed the maxCapacity.
 type Semaphore struct {
-	sem       uint32
-	lock      *sync.Mutex
-	guardChan chan *struct{}
+	sem          *semaphore.Weighted
+	lock         sync.Mutex
+	realCapacity int64
 }
 
+// NewSem new a Semaphore
 func NewSem(n uint32) *Semaphore {
 	s := &Semaphore{
-		sem:       n,
-		lock:      &sync.Mutex{},
-		guardChan: make(chan *struct{}, capacity),
+		sem:          semaphore.NewWeighted(maxCapacity),
+		realCapacity: int64(n),
 	}
 
-	go func() {
-		for i := uint32(0); i < n; i++ {
-			s.guardChan <- &struct{}{}
-		}
-	}()
-
+	s.sem.Acquire(context.Background(), maxCapacity-s.realCapacity)
 	return s
 }
 
+// Acquire acquires the semaphore
 func (s *Semaphore) Acquire() {
-	<-s.guardChan
+	s.AcquireWithContext(context.Background())
 }
 
-func (s *Semaphore) AcquireRaw() chan *struct{} {
-	return s.guardChan
+// AcquireWithContext acquires the semaphore with context
+func (s *Semaphore) AcquireWithContext(ctx context.Context) error {
+	return s.sem.Acquire(ctx, 1)
 }
 
+// Release releases one semaphore.
 func (s *Semaphore) Release() {
-	s.guardChan <- &struct{}{}
+	s.sem.Release(1)
 }
 
-func (s *Semaphore) SetMaxCount(n uint32) {
+// SetMaxCount set the size of 's' to 'n', this is an async operation and
+// the caller can watch the returned 'done' channel like below if it wants
+// to be notified at the completion:
+//       done := s.SetMaxCount(100)
+//       <-done
+// Note after receiving the notification, the caller should NOT assume the
+// size of 's' is 'n' unless it knows there are no concurrent calls to
+// 'SetMaxCount'.
+func (s *Semaphore) SetMaxCount(n int64) (done chan struct{}) {
+	done = make(chan struct{})
+
+	if n > maxCapacity {
+		n = maxCapacity
+	}
+
 	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if n > capacity {
-		n = capacity
-	}
-
-	if n == s.sem {
-		return
-	}
-
-	old := s.sem
-	s.sem = n
+	old := s.realCapacity
+	s.realCapacity = n
+	s.lock.Unlock()
 
 	go func() {
 		if n > old {
-			for i := uint32(0); i < n-old; i++ {
-				s.guardChan <- &struct{}{}
-			}
-			return
+			s.sem.Release(n - old)
+		} else if n < old {
+			s.sem.Acquire(context.Background(), old-n)
 		}
-
-		for i := uint32(0); i < old-n; i++ {
-			<-s.guardChan
-		}
+		close(done)
 	}()
+
+	return
 }

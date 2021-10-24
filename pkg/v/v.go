@@ -23,9 +23,10 @@ import (
 	"reflect"
 	"sync"
 
+	genjs "github.com/alecthomas/jsonschema"
 	yamljsontool "github.com/ghodss/yaml"
-	genjs "github.com/megaease/jsonschema"
 	loadjs "github.com/xeipuuv/gojsonschema"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/megaease/easegress/pkg/logger"
 	"github.com/megaease/easegress/pkg/util/jsontool"
@@ -45,22 +46,31 @@ type (
 )
 
 var (
-	validateReflector = &genjs.Reflector{
-		DefinitionNameWithPackage:  true,
+	reflector = &genjs.Reflector{
 		AllowAdditionalProperties:  true,
 		RequiredFromJSONSchemaTags: true,
+		PreferYAMLSchema:           true,
+		DoNotReference:             true,
+		ExpandedStruct:             true,
+
+		// NOTE: FullyQualifyTypeNames setting true will generate
+		// "$ref": "#/definitions/github.com/megaease/easegress/pkg/supervisor.MetaSpec",
+		// "definitions": {
+		//   "github.com/megaease/easegress/pkg/supervisor.MetaSpec": {
+		//      ...
+		//   }
+		// }
+		// FIXME if necessary:
+		// The $ref can't find it because the slash means a level in json schema.
+		// We can fix it by replace all slashes by `.` or `-`, etc in github.com/alecthomas/jsonschema.
 	}
-	generateReflector = &genjs.Reflector{
-		DefinitionNameWithPackage:  true,
-		RequiredFromJSONSchemaTags: true,
-	}
-	reflectorSchemaMetasMutex = sync.Mutex{}
-	reflectorSchemaMetas      = map[*genjs.Reflector]map[reflect.Type]*schemaMeta{}
+	schemaMetasMutex = sync.Mutex{}
+	schemaMetas      = map[reflect.Type]*schemaMeta{}
 )
 
 // GetSchemaInYAML returns the json schema of t in yaml format.
 func GetSchemaInYAML(t reflect.Type) ([]byte, error) {
-	sm, err := getSchemaMeta(generateReflector, t)
+	sm, err := getSchemaMeta(t)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +80,7 @@ func GetSchemaInYAML(t reflect.Type) ([]byte, error) {
 
 // GetSchemaInJSON return the json schema of t in json format.
 func GetSchemaInJSON(t reflect.Type) ([]byte, error) {
-	sm, err := getSchemaMeta(generateReflector, t)
+	sm, err := getSchemaMeta(t)
 	if err != nil {
 		return nil, err
 	}
@@ -79,62 +89,54 @@ func GetSchemaInJSON(t reflect.Type) ([]byte, error) {
 }
 
 // Validate validates by json schema rules, custom formats and general methods.
-func Validate(v interface{}, yamlBuff []byte) *ValidateRecorder {
+func Validate(v interface{}) *ValidateRecorder {
 	vr := &ValidateRecorder{}
 
-	if yamlBuff != nil {
-		sm, err := getSchemaMeta(validateReflector, reflect.TypeOf(v))
-		if err != nil {
-			vr.recordSystem(fmt.Errorf("get schema meta for %T failed: %v", v, err))
-			return vr
-		}
-
-		jsonBuff, err := yamljsontool.YAMLToJSON(yamlBuff)
-		if err != nil {
-			vr.recordSystem(fmt.Errorf("transform %s to json failed: %v", yamlBuff, err))
-			return vr
-		}
-
-		trimJSONBuff, err := jsontool.TrimNull(jsonBuff)
-		if err != nil {
-			vr.recordSystem(fmt.Errorf("trim null from %s failed: %v", jsonBuff, err))
-			return vr
-		}
-
-		docLoader := loadjs.NewBytesLoader(trimJSONBuff)
-		result, err := sm.schema.Validate(docLoader)
-		if err != nil {
-			logger.Errorf("BUG: invalid schema: %v", err)
-		}
-		vr.recordJSONSchema(result)
-
-		cv, ok := reflect.ValueOf(v).Interface().(ContentValidator)
-		if ok {
-			err = cv.Validate(yamlBuff)
-			if err != nil {
-				vr.GeneralErrs = append(vr.GeneralErrs, err.Error())
-			}
-			// if a custom ContentValidator is executed, `custom format validation` and `general validation` are not executed.
-			return vr
-		}
+	if v == nil {
+		vr.recordSystem(fmt.Errorf("nil value"))
 	}
 
+	yamlBuff, err := yaml.Marshal(v)
+	if err != nil {
+		vr.recordSystem(fmt.Errorf("marshal %#v to yaml string failed: %v", v, err))
+		return vr
+	}
+
+	sm, err := getSchemaMeta(reflect.TypeOf(v))
+	if err != nil {
+		vr.recordSystem(fmt.Errorf("get schema meta for %T failed: %v", v, err))
+		return vr
+	}
+
+	jsonBuff, err := yamljsontool.YAMLToJSON(yamlBuff)
+	if err != nil {
+		vr.recordSystem(fmt.Errorf("transform %s to json failed: %v", yamlBuff, err))
+		return vr
+	}
+
+	trimJSONBuff, err := jsontool.TrimNull(jsonBuff)
+	if err != nil {
+		vr.recordSystem(fmt.Errorf("trim null from %s failed: %v", jsonBuff, err))
+		return vr
+	}
+
+	docLoader := loadjs.NewBytesLoader(trimJSONBuff)
+	result, err := sm.schema.Validate(docLoader)
+	if err != nil {
+		logger.Errorf("BUG: invalid schema: %v", err)
+	}
+	vr.recordJSONSchema(result)
+
 	val := reflect.ValueOf(v)
-	traverseGo(&val, nil, vr.recordFormat)
-	traverseGo(&val, nil, vr.recordGeneral)
+	traverseGo(&val, nil, vr.record)
 
 	return vr
 }
 
-func getSchemaMeta(reflector *genjs.Reflector, t reflect.Type) (*schemaMeta, error) {
-	reflectorSchemaMetasMutex.Lock()
-	defer reflectorSchemaMetasMutex.Unlock()
+func getSchemaMeta(t reflect.Type) (*schemaMeta, error) {
+	schemaMetasMutex.Lock()
+	defer schemaMetasMutex.Unlock()
 
-	schemaMetas, exists := reflectorSchemaMetas[reflector]
-	if !exists {
-		schemaMetas = make(map[reflect.Type]*schemaMeta)
-		reflectorSchemaMetas[reflector] = schemaMetas
-	}
 	sm, exists := schemaMetas[t]
 	if exists {
 		return sm, nil
@@ -177,7 +179,7 @@ func getSchemaMeta(reflector *genjs.Reflector, t reflect.Type) (*schemaMeta, err
 //
 // 1. It traverses fields of the embedded struct.
 // 2. It does not traverse unexposed subfields of the struct.
-// 3. It pass nil to the argument StructField when it's not a struct field.
+// 3. It passes nil to the argument StructField when it's not a struct field.
 // 4. It stops when encoutering nil.
 func traverseGo(val *reflect.Value, field *reflect.StructField, fn func(*reflect.Value, *reflect.StructField)) {
 	t := val.Type()

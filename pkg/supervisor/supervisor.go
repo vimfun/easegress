@@ -18,6 +18,8 @@
 package supervisor
 
 import (
+	"fmt"
+	"os"
 	"runtime/debug"
 	"sync"
 
@@ -56,6 +58,24 @@ var (
 	globalSuper *Supervisor
 )
 
+func loadInitialObjects(s *Supervisor, paths []string) map[string]string {
+	objs := map[string]string{}
+	for _, path := range paths {
+		data, e := os.ReadFile(path)
+		if e != nil {
+			logger.Errorf("failed to load initial object, path: %s, error: %v", path, e)
+			continue
+		}
+		spec, e := s.NewSpec(string(data))
+		if e != nil {
+			logger.Errorf("failed to create spec for initial object, path: %s, error: %v", path, e)
+			continue
+		}
+		objs[spec.Name()] = spec.YAMLConfig()
+	}
+	return objs
+}
+
 // MustNew creates a Supervisor.
 func MustNew(opt *option.Options, cls cluster.Cluster) *Supervisor {
 	s := &Supervisor{
@@ -67,9 +87,11 @@ func MustNew(opt *option.Options, cls cluster.Cluster) *Supervisor {
 		done:            make(chan struct{}),
 	}
 
-	s.objectRegistry = newObjectRegistry(s)
+	initObjs := loadInitialObjects(s, opt.InitialObjectConfigFiles)
+
+	s.objectRegistry = newObjectRegistry(s, initObjs)
 	s.watcher = s.objectRegistry.NewWatcher(watcherName, FilterCategory(
-		// NOTE: SystemController is only initilized internally.
+		// NOTE: SystemController is only initialized internally.
 		// CategorySystemController,
 		CategoryBusinessController))
 
@@ -175,11 +197,12 @@ func (s *Supervisor) handleEvent(event *ObjectEntityWatcherEvent) {
 	}
 }
 
+// ObjectRegistry returns the registry of object
 func (s *Supervisor) ObjectRegistry() *ObjectRegistry {
 	return s.objectRegistry
 }
 
-// WalkObjectEntitys walks every controllers until walkFn returns false.
+// WalkControllers walks every controllers until walkFn returns false.
 func (s *Supervisor) WalkControllers(walkFn WalkFunc) {
 	defer func() {
 		if err := recover(); err != nil {
@@ -197,7 +220,17 @@ func (s *Supervisor) WalkControllers(walkFn WalkFunc) {
 	})
 }
 
-// GetObjectEntity returns the system controller with the existing flag.
+// MustGetSystemController wraps GetSystemController with panic.
+func (s *Supervisor) MustGetSystemController(name string) *ObjectEntity {
+	entity, exists := s.GetSystemController(name)
+	if !exists {
+		panic(fmt.Errorf("system controller %s not found", name))
+	}
+
+	return entity
+}
+
+// GetSystemController returns the system controller with the existing flag.
 // The name of system controller is its own kind.
 func (s *Supervisor) GetSystemController(name string) (*ObjectEntity, bool) {
 	entity, exists := s.systemControllers.Load(name)
@@ -207,7 +240,7 @@ func (s *Supervisor) GetSystemController(name string) (*ObjectEntity, bool) {
 	return entity.(*ObjectEntity), true
 }
 
-// GetObjectEntity returns the business controller with the existing flag.
+// GetBusinessController returns the business controller with the existing flag.
 func (s *Supervisor) GetBusinessController(name string) (*ObjectEntity, bool) {
 	entity, exists := s.businessControllers.Load(name)
 	if !exists {

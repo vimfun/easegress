@@ -18,6 +18,7 @@
 package httpserver
 
 import (
+	"net"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -88,9 +89,9 @@ type (
 func newIPFilterChain(parentIPFilters *ipfilter.IPFilters, childSpec *ipfilter.Spec) *ipfilter.IPFilters {
 	var ipFilters *ipfilter.IPFilters
 	if parentIPFilters != nil {
-		ipFilters = ipfilter.NewIPfilters(parentIPFilters.Filters()...)
+		ipFilters = ipfilter.NewIPFilters(parentIPFilters.Filters()...)
 	} else {
-		ipFilters = ipfilter.NewIPfilters()
+		ipFilters = ipfilter.NewIPFilters()
 	}
 
 	if childSpec != nil {
@@ -175,16 +176,19 @@ func (mr *muxRule) pass(ctx context.HTTPContext) bool {
 }
 
 func (mr *muxRule) match(ctx context.HTTPContext) bool {
-	r := ctx.Request()
-
 	if mr.host == "" && mr.hostRE == nil {
 		return true
 	}
 
-	if mr.host != "" && mr.host == r.Host() {
+	host := ctx.Request().Host()
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	if mr.host != "" && mr.host == host {
 		return true
 	}
-	if mr.hostRE != nil && mr.hostRE.MatchString(r.Host()) {
+	if mr.hostRE != nil && mr.hostRE.MatchString(host) {
 		return true
 	}
 
@@ -335,11 +339,11 @@ func (m *mux) reloadRules(superSpec *supervisor.Spec, muxMapper protocol.MuxMapp
 
 		paths := make([]*muxPath, len(specRule.Paths))
 		for j := 0; j < len(paths); j++ {
-			paths[j] = newMuxPath(ruleIPFilterChain, &specRule.Paths[j])
+			paths[j] = newMuxPath(ruleIPFilterChain, specRule.Paths[j])
 		}
 
 		// NOTE: Given the parent ipFilters not its own.
-		rules.rules[i] = newMuxRule(rules.ipFilterChan, &specRule, paths)
+		rules.rules[i] = newMuxRule(rules.ipFilterChan, specRule, paths)
 	}
 
 	m.rules.Store(rules)

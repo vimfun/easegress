@@ -182,7 +182,7 @@ func (tbw *TimeBasedWindow) evict(now time.Time) {
 	// evicts is how many buckets need to be evicted
 	evicts := seconds - len(tbw.bucket) + 1
 
-	// the begin time of the window need to be adjusted according to evicts
+	// the beginning time of the window need to be adjusted according to evicts
 	tbw.beginAt = tbw.beginAt.Add(time.Duration(evicts) * time.Second)
 
 	// evicts may be very large, but at most len(tbw.bucket) buckets need to
@@ -260,6 +260,7 @@ type (
 		WaitDurationInOpen               time.Duration
 	}
 
+	// Event stores the state change event
 	Event struct {
 		Time     time.Time
 		OldState string
@@ -281,7 +282,7 @@ type (
 		// stateID is the id of current state, it increases every time
 		// the state changes. the id is returned by AcquirePermission
 		// and must be passed back to RecordResult which will then use
-		// it to detect wether state changed or not, and if changed, the
+		// it to detect whether state changed or not, and if changed, the
 		// result is discarded as it does not belong to current state.
 		stateID  uint32
 		listener EventListenerFunc
@@ -305,19 +306,26 @@ var stateStrings = []string{
 	"ForceOpen",
 }
 
-// NewPolicy create and initialize a policy with default configuration
-func NewPolicy() *Policy {
+// NewPolicy create and initialize a policy
+func NewPolicy(failureRateThreshold, slowCallRateThreshold, slidingWindowType uint8,
+	slidingWindowSize, permittedNumberOfCallsInHalfOpen, minimumNumberOfCalls uint32,
+	slowCallDurationThreshold, maxWaitDurationInHalfOpen, waitDurationInOpen time.Duration) *Policy {
 	return &Policy{
-		FailureRateThreshold:             50,
-		SlowCallRateThreshold:            100,
-		SlidingWindowType:                CountBased,
-		SlidingWindowSize:                100,
-		PermittedNumberOfCallsInHalfOpen: 10,
-		MinimumNumberOfCalls:             100,
-		SlowCallDurationThreshold:        time.Minute,
-		MaxWaitDurationInHalfOpen:        0,
-		WaitDurationInOpen:               time.Minute,
+		FailureRateThreshold:             failureRateThreshold,
+		SlowCallRateThreshold:            slowCallRateThreshold,
+		SlidingWindowType:                slidingWindowType,
+		SlidingWindowSize:                slidingWindowSize,
+		PermittedNumberOfCallsInHalfOpen: permittedNumberOfCallsInHalfOpen,
+		MinimumNumberOfCalls:             minimumNumberOfCalls,
+		SlowCallDurationThreshold:        slowCallDurationThreshold,
+		MaxWaitDurationInHalfOpen:        maxWaitDurationInHalfOpen,
+		WaitDurationInOpen:               waitDurationInOpen,
 	}
+}
+
+// NewDefaultPolicy create and initialize a policy with default configuration
+func NewDefaultPolicy() *Policy {
+	return NewPolicy(50, 100, CountBased, 100, 10, 100, time.Minute, 0, time.Minute)
 }
 
 // New creates a circuit breaker based on `policy`,

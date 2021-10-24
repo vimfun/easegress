@@ -25,7 +25,7 @@ import (
 	"strings"
 	"unicode"
 
-	jwtgo "github.com/dgrijalva/jwt-go"
+	jwtgo "github.com/golang-jwt/jwt"
 
 	"github.com/megaease/easegress/pkg/logger"
 	"github.com/megaease/easegress/pkg/util/hashtool"
@@ -430,7 +430,7 @@ func (p *parser) getSourceKey() (string, error) {
 	if p.conditions[p.offset] != '.' {
 		return "", errors.New("illegal key")
 	}
-	p.offset += 1
+	p.offset++
 	return p.pop(), nil
 }
 

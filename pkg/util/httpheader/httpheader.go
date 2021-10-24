@@ -131,7 +131,7 @@ func (h *HTTPHeader) AddFrom(src *HTTPHeader) {
 }
 
 // AddFromStd wraps AddFrom by replacing
-// the paramenter type *HTTPHeader with standard http.Header.
+// the parameter type *HTTPHeader with standard http.Header.
 func (h *HTTPHeader) AddFromStd(src http.Header) {
 	h.AddFrom(New(src))
 }
@@ -146,7 +146,7 @@ func (h *HTTPHeader) SetFrom(src *HTTPHeader) {
 }
 
 // SetFromStd wraps Setfrom by replacing
-// the paramenter type *HTTPHeader with standard http.Header.
+// the parameter type *HTTPHeader with standard http.Header.
 func (h *HTTPHeader) SetFromStd(src http.Header) {
 	h.SetFrom(New(src))
 }
@@ -159,9 +159,8 @@ func renderTemplate(input string, te texttemplate.TemplateEngine) (output string
 		if err != nil {
 			logger.Errorf("BUG, render header value %s failed err %v", input, err)
 			return
-		} else {
-			ok = true
 		}
+		ok = true
 	}
 	return
 }

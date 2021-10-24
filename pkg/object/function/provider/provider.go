@@ -75,7 +75,7 @@ func (kc *knativeClient) GetStatus(name string) (*spec.Status, error) {
 	if len(service.Status.LatestReadyRevisionName) == 0 ||
 		service.Status.LatestCreatedRevisionName != service.Status.LatestReadyRevisionName {
 		for _, v := range service.Status.Conditions {
-			// There are three types of condiction, false, unknown, true
+			// There are three types of condition, false, unknown, true
 			if v.Status == corev1.ConditionFalse {
 				hasErrors = true
 			}
@@ -107,7 +107,7 @@ func (kc *knativeClient) Delete(name string) error {
 	return kc.deleteService(name)
 }
 
-// NewProviderClient returns FaaSProvider client. It only supports Knative now.
+// NewProvider returns FaaSProvider client. It only supports Knative now.
 func NewProvider(superSpec *supervisor.Spec) FaaSProvider {
 	return &knativeClient{
 		superSpec: superSpec,

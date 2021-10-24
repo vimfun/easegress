@@ -35,16 +35,19 @@ const (
 	serviceConfigURL = "/config-service"
 )
 
+// AgentInterface is the interface operate the agent client
 type AgentInterface interface {
 	UpdateService(newService *spec.Service, version int64) error
 	UpdateCanary(globalHeaders *spec.GlobalCanaryHeaders, version int64) error
 }
 
+// AgentClient stores the information of agent client
 type AgentClient struct {
 	URL        string
-	HttpClient *http.Client
+	HTTPClient *http.Client
 }
 
+// NewAgentClient creates the agent client
 func NewAgentClient(host, port string) *AgentClient {
 	return &AgentClient{
 		"http://" + host + ":" + port,
@@ -52,6 +55,7 @@ func NewAgentClient(host, port string) *AgentClient {
 	}
 }
 
+// UpdateService updates service.
 func (agent *AgentClient) UpdateService(newService *spec.Service, version int64) error {
 	buff, err := yaml.Marshal(newService)
 	if err != nil {
@@ -61,7 +65,7 @@ func (agent *AgentClient) UpdateService(newService *spec.Service, version int64)
 	if err != nil {
 		return fmt.Errorf("convert yaml %s to json failed: %v", buff, err)
 	}
-	kvMap, err := JsonToKVMap(string(jsonBytes))
+	kvMap, err := JSONToKVMap(string(jsonBytes))
 	kvMap["version"] = strconv.FormatInt(version, 10)
 
 	bytes, err := json.Marshal(kvMap)
@@ -70,11 +74,15 @@ func (agent *AgentClient) UpdateService(newService *spec.Service, version int64)
 	}
 
 	url := agent.URL + serviceConfigURL
-	resp, err := handleRequest(http.MethodPut, url, bytes)
-	logger.Infof("Update Service, URL: %s,request: %s, result: %v", url, string(bytes), resp)
+	bodyString, err := handleRequest(http.MethodPut, url, bytes)
+	if err != nil {
+		return fmt.Errorf("handleRequest error: %v", err)
+	}
+	logger.Debugf("update service: URL: %s request: %s result: %v", url, string(bytes), string(bodyString))
 	return err
 }
 
+// UpdateCanary updates canary.
 func (agent *AgentClient) UpdateCanary(globalHeaders *spec.GlobalCanaryHeaders, version int64) error {
 	buff, err := yaml.Marshal(globalHeaders)
 	if err != nil {
@@ -84,7 +92,7 @@ func (agent *AgentClient) UpdateCanary(globalHeaders *spec.GlobalCanaryHeaders, 
 	if err != nil {
 		return fmt.Errorf("convert yaml %s to json failed: %v", buff, err)
 	}
-	kvMap, err := JsonToKVMap(string(jsonBytes))
+	kvMap, err := JSONToKVMap(string(jsonBytes))
 	kvMap["version"] = strconv.FormatInt(version, 10)
 
 	bytes, err := json.Marshal(kvMap)
@@ -93,7 +101,10 @@ func (agent *AgentClient) UpdateCanary(globalHeaders *spec.GlobalCanaryHeaders, 
 	}
 
 	url := agent.URL + canaryConfigURL
-	resp, err := handleRequest(http.MethodPut, url, bytes)
-	logger.Infof("Update Canary, URL: %s, request %s, result: %v", url, string(bytes), resp)
+	bodyString, err := handleRequest(http.MethodPut, url, bytes)
+	if err != nil {
+		return fmt.Errorf("handleRequest error: %v", err)
+	}
+	logger.Infof("Update Canary, URL: %s,request: %s, result: %v", url, string(bytes), string(bodyString))
 	return err
 }

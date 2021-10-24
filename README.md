@@ -1,31 +1,34 @@
 # Easegress
 
+<a href="https://megaease.com/easegress">
+    <img src="./doc/easegress.svg"
+        alt="Easegress logo" title="Easegress" height="175" width="175" align="right"/>
+</a>
+
 - [Easegress](#easegress)
   - [What is Easegress](#what-is-easegress)
   - [Features](#features)
-  - [Get Started](#get-started)
+  - [User Cases](#user-cases)
+  - [Getting Started](#getting-started)
     - [Setting up Easegress](#setting-up-easegress)
     - [Create an HTTPServer and Pipeline](#create-an-httpserver-and-pipeline)
     - [Test](#test)
     - [More Filters](#more-filters)
   - [Documentation](#documentation)
   - [Roadmap](#roadmap)
+  - [Community](#community)
   - [License](#license)
 
 ## What is Easegress
-<a href="https://megaease.com/easegress">
-    <img src="./doc/easegress.svg"
-         alt="Easegress logo" title="Easegress" height="100" width="100"  align="right"/>
-</a>
 
 `Easegress` is a Cloud Native traffic orchestration system designed for:
 
 - **High Availability:** Built-in Raft consensus & leader election provides 99.99% availability.
 - **Traffic Orchestration:** Simple orchestration of various filters for each traffic pipeline.
 - **High Performance:** Lightweight and essential features speed up the performance.
-- **Observability:**  There are many meaningful statistics periodically in a readable way.
+- **Observability:** There are many meaningful statistics periodically in a readable way.
 - **Extensibility:** It's easy to develop your own filter or controller with high-level programming language.
-- **Integration:** The simple interfaces make it easy to integrate with other systems, such as Kubernetes Ingress, EaseMesh(open source coming soon) sidecar, Workflow, etc.
+- **Integration:** The simple interfaces make it easy to integrate with other systems, such as Kubernetes Ingress, [EaseMesh](https://github.com/megaease/easemesh) sidecar, Workflow, etc.
 
 The architecture of Easegress:
 
@@ -38,7 +41,7 @@ The architecture of Easegress:
 		- HTTP/1.1
 		- HTTP/2
 		- HTTP/3(QUIC)
-		- MQTT(coming soon)
+		- MQTT
 	- **Rich Routing Rules:** exact path, path prefix, regular expression of the path, method, headers.
 	- **Resilience&Fault Tolerance**
 		- **Circuit breaker:** temporarily blocks possible failures.
@@ -65,9 +68,13 @@ The architecture of Easegress:
 		- **Mesh Master:** is the control plane to manage the lifecycle of mesh services.
 		- **Mesh Sidecar:** is the data plane as the endpoint to do traffic interception and routing.
 		- **Mesh Ingress Controller:** is the mesh-specific ingress controller to route external traffic to mesh services.
+		  > Notes: This feature is leveraged by [EaseMesh](https://github.com/megaease/easemesh)
 	- **Third-Part Integration**
 		- **FaaS** integrates with the serverless platform Knative.
 		- **Service Discovery** integrates with Eureka, Consul, Etcd, and Zookeeper.
+		- **Ingress Controller** integrates with Kubernetes as an ingress controller.
+- **Extensibility**
+    - **WebAssembly** executes user developed [WebAssembly](https://webassembly.org/) code.
 - **High Performance and Availability**
 	- **Adaption**: adapts request, response in the handling chain.
 	- **Validation**: headers validation, OAuth2, JWT, and HMAC verification.
@@ -78,32 +85,54 @@ The architecture of Easegress:
 - **Operation**
 	- **Easy to Integrate:** command line(`egctl`), MegaEase Portal, HTTP clients such as curl, postman, etc.
 	- **Distributed Tracing**
-		- Built-in  [Open Zipkin](https://zipkin.io/)
+		- Built-in [Open Zipkin](https://zipkin.io/)
 		- [Open Tracing](https://opentracing.io/) for vendor-neutral APIs
 	- **Observability**
 		- **Node:** role(leader, writer, reader), health or not, last heartbeat time, and so on
 		- **Traffic:** in multi-dimension: server and backend.
 			- **Throughput:** total and error statistics of request count, TPS/m1, m5, m15, and error percent, etc.
-			- **Latency:** p25, p50, p75, p95, 98, p99, p999.
+			- **Latency:** p25, p50, p75, p95, p98, p99, p999.
 			- **Data Size:** request and response size.
 			- **Status Codes:** HTTP status codes.
 			- **TopN:** sorted by aggregated APIs(only in server dimension).
 
-## Get Started
+
+## User Cases
+
+The following examples show how to use Easegress for different scenarios.
+
+- [API Aggregator](./doc/cookbook/api_aggregator.md) - Aggregating many APIs into a single API.
+- [Distributed Tracing](./doc/cookbook/distributed_tracing.md) - How to do APM tracing  - Zipkin.
+- [FaaS](./doc/cookbook/faas.md) - Supporting Knative FaaS integration
+- [Flash Sale](./doc/cookbook/flash_sale.md) - How to do high concurrent promotion sales with Easegress
+- [Kubernetes Ingress Controller](./doc/cookbook/k8s_ingress_controller.md) - How to integrated with Kubernetes as ingress controller
+- [LoadBalancer](./doc/cookbook/load_balancer.md) - A number of strategy of load balancing
+- [MQTTProxy](./doc/cookbook/mqtt_proxy.md) - An Example to MQTT proxy with Kafka backend.
+- [Performance](./doc/cookbook/performance.md) - Performance optimization - compression, caching etc.
+- [Pipeline](./doc/cookbook/pipeline.md) - How to orchestrate HTTP filters for requests/responses handling
+- [Resilience and Fault Tolerance](./doc/cookbook/resilience.md) - Circuit Breaker, Rate Lmiter, Retryer, Time limiter, etc. (Porting from [Java resilience4j](https://github.com/resilience4j/resilience4j))
+- [Security](./doc/cookbook/security.md) - How to do authenication by Header, JWT, HMAC, OAuth2, etc.
+- [Service Proxy](./doc/cookbook/service_proxy.md) - Supporting the Microservice  registries - Zookeeper, Eureka, Consul, Nacos, etc.
+- [WebAssembly](./doc/cookbook/wasm.md) - Using AssemblyScript to extend the Easegress
+- [Workflow](./doc/cookbook/workflow.md) - An Example to make a workflow for a number of APIs.
+
+For full list, see [Cookbook](./doc/cookbook/README.md).
+
+## Getting Started
 
 The basic common usage of Easegress is to quickly set up proxy for the backend servers. We split it into multiple simple steps to illustrate the essential concepts and operations.
 
 ### Setting up Easegress
 
-We can download the binary from [release page](https://github.com/megaease/easegress/releases). For example we use linux version:
+We can download the latest or history binaries from the [release page](https://github.com/megaease/easegress/releases). For example, we can install Easegress v1.0.0 for Linux amd64 platform with command:
 
 ```bash
 $ mkdir easegress
-$ wget https://github.com/megaease/easegress/releases/download/v1.0.1/easegress-v1.0.1-linux-amd64.tar.gz
-$ tar zxvf easegress-v1.0.1-linux-amd64.tar.gz -C easegress && cd easegress
+$ wget https://github.com/megaease/easegress/releases/download/v1.0.0/easegress-v1.0.0-linux-amd64.tar.gz
+$ tar zxvf easegress-v1.0.0-linux-amd64.tar.gz -C easegress && cd easegress
 ```
 
-or use source code:
+or if we can install Easegress from source code:
 
 ```bash
 $ git clone https://github.com/megaease/easegress && cd easegress
@@ -285,13 +314,20 @@ Body  : {"message": "Hello, Easegress"}
 
 We can also see Easegress send one more header `X-Adapt-Key: goodplan` to the mirror service.
 
+
 ## Documentation
 
 See [reference](./doc/reference.md) and [developer guide](./doc/developer-guide.md) for more information.
 
-## Roadmap 
+## Roadmap
 
 See [Easegress Roadmap](./doc/Roadmap.md) for details.
+
+## Community
+
+- [Join Slack Workspace](https://join.slack.com/t/openmegaease/shared_invite/zt-upo7v306-lYPHvVwKnvwlqR0Zl2vveA) for requirement, issue and development.
+- [MegaEase on Twitter](https://twitter.com/megaease)
+
 
 ## License
 

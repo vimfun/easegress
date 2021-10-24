@@ -47,6 +47,7 @@ type Options struct {
 	ShowConfig      bool   `yaml:"-"`
 	ConfigFile      string `yaml:"-"`
 	ForceNewCluster bool   `yaml:"-"`
+	SignalUpgrade   bool   `yaml:"-"`
 
 	// If a config file is specified, below command line flags will be ignored.
 
@@ -63,6 +64,7 @@ type Options struct {
 	ClusterJoinURLs                 []string          `yaml:"cluster-join-urls"`
 	APIAddr                         string            `yaml:"api-addr"`
 	Debug                           bool              `yaml:"debug"`
+	InitialObjectConfigFiles        []string          `yaml:"initial-object-config-files"`
 
 	// Path.
 	HomeDir   string `yaml:"home-dir"`
@@ -95,6 +97,7 @@ func New() *Options {
 	opt.flags.BoolVarP(&opt.ShowConfig, "print-config", "c", false, "Print the configuration.")
 	opt.flags.StringVarP(&opt.ConfigFile, "config-file", "f", "", "Load server configuration from a file(yaml format), other command line flags will be ignored if specified.")
 	opt.flags.BoolVar(&opt.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster.")
+	opt.flags.BoolVar(&opt.SignalUpgrade, "signal-upgrade", false, "Send an upgrade signal to the server based on the local pid file, then exit. The original server will start a graceful upgrade after signal received.")
 	opt.flags.StringVar(&opt.Name, "name", "eg-default-name", "Human-readable name for this member.")
 	opt.flags.StringToStringVar(&opt.Labels, "labels", nil, "The labels for the instance of Easegress.")
 	opt.flags.StringVar(&opt.ClusterName, "cluster-name", "eg-cluster-default-name", "Human-readable name for the new cluster, ignored while joining an existed cluster.")
@@ -107,6 +110,7 @@ func New() *Options {
 	opt.flags.StringSliceVar(&opt.ClusterJoinURLs, "cluster-join-urls", nil, "List of URLs to join, when the first url is the same with any one of cluster-initial-advertise-peer-urls, it means to join itself, and this config will be treated empty.")
 	opt.flags.StringVar(&opt.APIAddr, "api-addr", "localhost:2381", "Address([host]:port) to listen on for administration traffic.")
 	opt.flags.BoolVar(&opt.Debug, "debug", false, "Flag to set lowest log level from INFO downgrade DEBUG.")
+	opt.flags.StringSliceVar(&opt.InitialObjectConfigFiles, "initial-object-config-files", nil, "List of configuration files for initial objects, these objects will be created at startup if not already exist.")
 
 	opt.flags.StringVar(&opt.HomeDir, "home-dir", "./", "Path to the home directory.")
 	opt.flags.StringVar(&opt.DataDir, "data-dir", "data", "Path to the data directory.")

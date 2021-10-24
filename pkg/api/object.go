@@ -40,47 +40,44 @@ const (
 	StatusObjectPrefix = "/status/objects"
 )
 
-func (s *Server) objectAPIEntries() []*APIEntry {
-	return []*APIEntry{
-		&APIEntry{
+func (s *Server) objectAPIEntries() []*Entry {
+	return []*Entry{
+		{
 			Path:    ObjectKindsPrefix,
 			Method:  "GET",
 			Handler: s.listObjectKinds,
 		},
-
-		&APIEntry{
+		{
 			Path:    ObjectPrefix,
 			Method:  "POST",
 			Handler: s.createObject,
 		},
-		&APIEntry{
+		{
 			Path:    ObjectPrefix,
 			Method:  "GET",
 			Handler: s.listObjects,
 		},
-
-		&APIEntry{
+		{
 			Path:    ObjectPrefix + "/{name}",
 			Method:  "GET",
 			Handler: s.getObject,
 		},
-		&APIEntry{
+		{
 			Path:    ObjectPrefix + "/{name}",
 			Method:  "PUT",
 			Handler: s.updateObject,
 		},
-		&APIEntry{
+		{
 			Path:    ObjectPrefix + "/{name}",
 			Method:  "DELETE",
 			Handler: s.deleteObject,
 		},
-
-		&APIEntry{
+		{
 			Path:    StatusObjectPrefix,
 			Method:  "GET",
 			Handler: s.listStatusObjects,
 		},
-		&APIEntry{
+		{
 			Path:    StatusObjectPrefix + "/{name}",
 			Method:  "GET",
 			Handler: s.getStatusObject,

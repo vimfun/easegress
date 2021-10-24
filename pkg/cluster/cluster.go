@@ -31,9 +31,9 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	yaml "gopkg.in/yaml.v2"
 
-	"github.com/megaease/easegress/pkg/common"
 	"github.com/megaease/easegress/pkg/logger"
 	"github.com/megaease/easegress/pkg/option"
+	"github.com/megaease/easegress/pkg/util/contexttool"
 )
 
 const (
@@ -163,26 +163,25 @@ func New(opt *option.Options) (Cluster, error) {
 	return c, nil
 }
 
+func (c *cluster) IsLeader() bool {
+	server, err := c.getServer()
+	if err != nil {
+		return false
+	}
+
+	return server.Server.Leader() == server.Server.ID()
+}
+
 // requestContext returns context with request timeout,
 // please use it immediately in case of incorrect timeout.
 func (c *cluster) requestContext() context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), c.requestTimeout)
-	go func() {
-		time.Sleep(c.requestTimeout)
-		cancel()
-	}()
-	return ctx
+	return contexttool.TimeoutContext(c.requestTimeout)
 }
 
 // longRequestContext takes 3 times longer than requestContext.
 func (c *cluster) longRequestContext() context.Context {
 	requestTimeout := 3 * c.requestTimeout
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	go func() {
-		time.Sleep(requestTimeout)
-		cancel()
-	}()
-	return ctx
+	return contexttool.TimeoutContext(requestTimeout)
 }
 
 func (c *cluster) run() {
@@ -302,7 +301,7 @@ func (c *cluster) addSelfToCluster() error {
 					member.ID, err)
 				panic(err)
 			} else {
-				logger.Warnf("remove unhealthy etcd memebr %x for adding self to cluster",
+				logger.Warnf("remove unhealthy etcd member %x for adding self to cluster",
 					member.ID)
 			}
 		}
@@ -364,18 +363,6 @@ func (c *cluster) checkClusterName() error {
 	}
 
 	return nil
-}
-
-// removeAndBackupEtcdData is DEPRECATED,
-// will be deleted when it's sure that we won't need it.
-func (c *cluster) removeAndBackupEtcdData() {
-	if !common.IsDirEmpty(c.opt.AbsDataDir) {
-		logger.Infof("backup and clean %s", c.opt.AbsDataDir)
-		err := common.BackupAndCleanDir(c.opt.AbsDataDir)
-		if err != nil {
-			logger.Errorf("backup and clean %s failed: %v", c.opt.AbsDataDir, err)
-		}
-	}
 }
 
 func (c *cluster) getClient() (*clientv3.Client, error) {
@@ -506,15 +493,15 @@ func (c *cluster) initLease() error {
 		resp, err := client.Lease.TimeToLive(c.requestContext(), *leaseID)
 		if err != nil || resp.TTL < minTTL {
 			return c.grantNewLease()
-		} else {
-			// NOTE: Use existed lease.
-			c.lease = leaseID
-			logger.Infof("lease is ready(use existed one: %x)", *c.lease)
-			return nil
 		}
-	} else {
-		return c.grantNewLease()
+		// NOTE: Use existed lease.
+		c.lease = leaseID
+		logger.Infof("lease is ready(use existed one: %x)", *c.lease)
+		return nil
+
 	}
+	return c.grantNewLease()
+
 }
 
 func (c *cluster) grantNewLease() error {
@@ -622,13 +609,17 @@ func closeEtcdServer(s *embed.Etcd) {
 		<-s.Server.StopNotify()
 	default:
 		s.Server.HardStop()
+		for _, client := range s.Clients {
+			if client != nil {
+				client.Close()
+			}
+		}
+		for _, peer := range s.Peers {
+			if peer != nil {
+				peer.Close()
+			}
+		}
 		logger.Infof("hard stop server")
-	}
-	for _, client := range s.Clients {
-		client.Close()
-	}
-	for _, peer := range s.Peers {
-		peer.Close()
 	}
 }
 
@@ -742,7 +733,7 @@ func (c *cluster) defrag() {
 				logger.Errorf("defrag failed: get client failed: %v", err)
 			}
 
-			// NOTICE: It need longer time than normal ones.
+			// NOTICE: It needs longer time than normal ones.
 			_, err = client.Defragment(c.longRequestContext(), c.opt.ClusterAdvertiseClientURLs[0])
 			if err != nil {
 				defragInterval = defragFailedInterval

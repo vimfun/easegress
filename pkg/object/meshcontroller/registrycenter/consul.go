@@ -51,6 +51,7 @@ func (rcs *Server) ToConsulHealthService(serviceInfo *ServiceRegistryInfo) []*ap
 		Address: serviceInfo.Ins.IP,
 		Service: serviceInfo.Ins.ServiceName,
 	}
+	svc.Checks = make(api.HealthChecks, 0)
 	svcs = append(svcs, &svc)
 	return svcs
 }
@@ -58,7 +59,7 @@ func (rcs *Server) ToConsulHealthService(serviceInfo *ServiceRegistryInfo) []*ap
 // ToConsulServices transforms registry center's service info to map[string][]string structure
 func (rcs *Server) ToConsulServices(serviceInfos []*ServiceRegistryInfo) map[string][]string {
 	var (
-		svcs     map[string][]string = make(map[string][]string)
+		svcs     = make(map[string][]string)
 		emptyTag []string
 	)
 

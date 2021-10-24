@@ -242,15 +242,14 @@ func (ings *ingressServer) add(pipeline string) error {
 	index := ings.find(pipeline)
 	// not backend as function's pipeline
 	if index == -1 {
-		rule := httpserver.Rule{
-			Paths: []httpserver.Path{
+		rule := &httpserver.Rule{
+			Paths: []*httpserver.Path{
 				{
 					PathPrefix: "/",
 					Headers: []*httpserver.Header{
 						{
-							Key:     ingressFunctionKey,
-							Values:  []string{pipeline},
-							Backend: pipeline,
+							Key:    ingressFunctionKey,
+							Values: []string{pipeline},
 						},
 					},
 					Backend: pipeline,

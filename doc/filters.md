@@ -43,8 +43,11 @@
   - [Validator](#validator)
     - [Configuration](#configuration-13)
     - [Results](#results-13)
+  - [WasmHost](#wasmhost)
+    - [Configuration](#configuration-14)
+    - [Results](#results-14)
   - [Common Types](#common-types)
-    - [apiaggregator.APIProxy](#apiaggregatorapiproxy)
+    - [apiaggregator.Pipeline](#apiaggregatorpipeline)
     - [pathadaptor.Spec](#pathadaptorspec)
     - [pathadaptor.RegexpReplace](#pathadaptorregexpreplace)
     - [httpheader.AdaptSpec](#httpheaderadaptspec)
@@ -76,17 +79,17 @@ A Filter is a request/response processor. Multiple filters can be orchestrated t
 
 ## APIAggregator
 
-The API Aggregator forwards one request to multiple API proxies and aggregates responses.
+The API Aggregator forwards one request to multiple API HTTP Pipelines in the same namespace and aggregates responses.
 
-Below is an example configuration that forwards one request to two proxies, `http-proxy-1` and `http-proxy-2`. When forwarding a request to `http-proxy-2`, the request method is changed to `GET` and a new header `Original-Method` is added with the original request method. The two responses are merged into one before return to the client.
+Below is an example configuration that forwards one request to two pipelines, `http-pipeline-1` and `http-pipeline-2`. When forwarding a request to `http-pipeline-2`, the request method is changed to `GET` and a new header `Original-Method` is added with the original request method. The two responses are merged into one before return to the client.
 
 ```yaml
 kind: APIAggregator
 name: api-aggregator-example
 mergeResponse: true
-apiProxies:
-- httpProxyName: http-proxy-1
-- httpProxyName: http-proxy-2
+pipelines:
+- name: http-pipeline-1
+- name: http-pipeline-2
   method: GET
   header:
     add:
@@ -99,10 +102,10 @@ apiProxies:
 | Name           | Type                                               | Description                                                                                                                                     | Required |
 | -------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | maxBodyBytes   | int64                                              | The upper limit of request body size, default is 0 which means no limit                                                                         | No       |
-| partialSucceed | boolean                                            | Whether regards the result of the original request as successful or not when a request to some of the API proxies fails, default is false       | No       |
+| partialSucceed | bool                                               | Whether regards the result of the original request as successful or not when a request to some of the API pipelines fails, default is false     | No       |
 | timeout        | string                                             | Timeout duration for requests to API proxies                                                                                                    | No       |
-| mergeResponse  | boolean                                            | Whether merging the multiple response objects into one, default is false means the final response is an array of the responses from API proxies | No       |
-| apiProxies     | [][apiaggregator.APIProxy](#apiaggregatorapiproxy) | Configuration of API proxies                                                                                                                    | Yes      |
+| mergeResponse  | bool                                               | Whether merging the multiple response objects into one, default is false means the final response is an array of the responses from API proxies | No       |
+| pipelines      | [][apiaggregator.Pipeline](#apiaggregatorpipeline) | Configuration of API proxies                                                                                                                    | Yes      |
 
 ### Results
 
@@ -232,7 +235,7 @@ allowedMethods: [GET]
 | allowedOrigins   | []string | An array of origins a cross-domain request can be executed from. If the special `*` value is present in the list, all origins will be allowed. An origin may contain a wildcard (*) to replace 0 or more characters (i.e.: http://*.domain.com). Usage of wildcards implies a small performance penalty. Only one wildcard can be used per origin. Default value is `*` | No       |
 | allowedMethods   | []string | An array of methods the client is allowed to use with cross-domain requests. The default value is simple methods (HEAD, GET, and POST)                                                                                                                                                                                                                                  | No       |
 | allowedHeaders   | []string | An array of non-simple headers the client is allowed to use with cross-domain requests. If the special `*` value is present in the list, all headers will be allowed. The default value is [] but "Origin" is always appended to the list                                                                                                                               | No       |
-| allowCredentials | boolean  | Indicates whether the request can include user credentials like cookies, HTTP authentication, or client-side SSL certificates                                                                                                                                                                                                                                           | No       |
+| allowCredentials | bool     | Indicates whether the request can include user credentials like cookies, HTTP authentication, or client-side SSL certificates                                                                                                                                                                                                                                           | No       |
 | exposedHeaders   | []string | Indicates which headers are safe to expose to the API of a CORS API specification                                                                                                                                                                                                                                                                                       | No       |
 
 ### Results
@@ -306,7 +309,7 @@ The below example configuration forwards request & response information to `http
 
 ```yaml
 kind: RemoteFilter
-name: remote-fileter-example
+name: remote-filter-example
 url: http://127.0.0.1:9096/verify
 timeout: 500ms
 ```
@@ -598,17 +601,61 @@ oauth2:
 | ------- | ----------------------------------- |
 | invalid | The request doesn't pass validation |
 
+## WasmHost
+
+The WasmHost filter implements a host environment for user-developed [WebAssembly](https://webassembly.org/) code. Below is an example configuration that loads wasm code from a file, and more details could be found at [this document](./wasmhost.md).
+
+```yaml
+name: wasm-host-example
+kind: WasmHost
+maxConcurrency: 2
+code: /home/megaease/wasm/hello.wasm
+timeout: 200ms
+```
+
+Note: this filter is disabled in the default build of `Easegress`, it can be enabled by:
+
+```bash
+$ make GOTAGS=wasmhost
+```
+
+or
+
+```bash
+$ go build -tags=wasmhost
+```
+
+### Configuration
+
+| Name           | Type              | Description                                                                                     | Required |
+| -------------- | ----------------- | ----------------------------------------------------------------------------------------------- | -------- |
+| maxConcurrency | int32             | The maximum requests the filter can process concurrently. Default is 10 and minimum value is 1. | Yes      |
+| code           | string            | The wasm code, can be the base64 encoded code, or path/url of the file which contains the code. | Yes      |
+| timeout        | string            | Timeout for wasm execution, default is 100ms.                                                   | Yes      |
+| parameters     | map[string]string | Parameters to initialize the wasm code.                                                         | No       |
+
+
+### Results
+
+| Value                                                                       | Description                                        |
+| --------------------------------------------------------------------------- | -------------------------------------------------- |
+| outOfVM                                                                     | Can not found an available wasm VM.                |
+| wasmError                                                                   | An error occurs during the execution of wasm code. |
+| wasmResult1 <td rowspan="3">Results defined and returned by wasm code.</td> |
+| ...                                                                         |
+| wasmResult9                                                                 |
+
 ## Common Types
 
-### apiaggregator.APIProxy
+### apiaggregator.Pipeline
 
-| Name          | Type                                         | Description                                                                | Required |
-| ------------- | -------------------------------------------- | -------------------------------------------------------------------------- | -------- |
-| httpProxyName | string                                       | The name of target HTTP pipeline                                           | Yes      |
-| method        | string                                       | Replaces request method with the value of this option when specified       | No       |
-| path          | [pathadaptor.Spec](#pathadaptorSpec)         | Rules to revise request path                                               | No       |
-| header        | [httpheader.AdaptSpec](#httpheaderAdaptSpec) | Rules to revise request header                                             | No       |
-| disableBody   | boolean                                      | Whether forwards the body of the original request or not, default is false | No       |
+| Name        | Type                                         | Description                                                                | Required |
+| ----------- | -------------------------------------------- | -------------------------------------------------------------------------- | -------- |
+| name        | string                                       | The name of target HTTP pipeline                                           | Yes      |
+| method      | string                                       | Replaces request method with the value of this option when specified       | No       |
+| path        | [pathadaptor.Spec](#pathadaptorSpec)         | Rules to revise request path                                               | No       |
+| header      | [httpheader.AdaptSpec](#httpheaderAdaptSpec) | Rules to revise request header                                             | No       |
+| disableBody | bool                                         | Whether forwards the body of the original request or not, default is false | No       |
 
 ### pathadaptor.Spec
 
@@ -640,7 +687,7 @@ Rules to revise request header. Note that both header name and value can be a te
 
 | Name        | Type              | Description                                                                             | Required |
 | ----------- | ----------------- | --------------------------------------------------------------------------------------- | -------- |
-| forCodes    | boolean           | When true, fallback handles HTTP status code listed in `failureCodes`, default is false | No       |
+| forCodes    | bool              | When true, fallback handles HTTP status code listed in `failureCodes`, default is false | No       |
 | mockCode    | int               | Please refer the [Fallback](filters.md#Fallback) filter                                 | Yes      |
 | mockHeaders | map[string]string | Please refer the [Fallback](filters.md#Fallback) filter                                 | No       |
 | mockBody    | string            | Please refer the [Fallback](filters.md#Fallback) filter                                 | No       |
@@ -749,19 +796,19 @@ The relationship between `methods` and `url` is `AND`.
 
 ### circuitbreaker.Policy
 
-| Name                                  | Type    | Description                                                                                                                                                                                                                                                                                                                                                                                                                              | Required |
-| ------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| name                                  | string  | Name of the policy. Must be unique in one CircuitBreaker configuration                                                                                                                                                                                                                                                                                                                                                                   | Yes      |
-| slidingWindowType                     | string  | Type of the sliding window which is used to record the outcome of requests when the CircuitBreaker is `CLOSED`. Sliding window can either be `COUNT_BASED` or `TIME_BASED`. If the sliding window is `COUNT_BASED`, the last `slidingWindowSize` requests are recorded and aggregated. If the sliding window is `TIME_BASED`, the requests of the last `slidingWindowSize` seconds are recorded and aggregated. Default is `COUNT_BASED` | No       |
-| failureRateThreshold                  | int8    | Failure rate threshold in percentage. When the failure rate is equal to or greater than the threshold the CircuitBreaker transitions to `OPEN` and starts short-circuiting requests. Default is 50                                                                                                                                                                                                                                       | No       |
-| slowCallRateThreshold                 | int8    | Slow rate threshold in percentage. The CircuitBreaker considers a request as slow when its duration is greater than `slowCallDurationThreshold`. When the percentage of slow requests is equal to or greater than the threshold, the CircuitBreaker transitions to `OPEN` and starts short-circuiting requests. Default is 100                                                                                                           | No       |
-| countingNetworkError                  | boolean | Counting network error as failure or not. Default is false                                                                                                                                                                                                                                                                                                                                                                               | No       |
-| slidingWindowSize                     | uint32  | The size of the sliding window which is used to record the outcome of requests when the CircuitBreaker is `CLOSED`. Default is 100                                                                                                                                                                                                                                                                                                       | No       |
-| permittedNumberOfCallsInHalfOpenState | uint32  | The number of permitted requests when the CircuitBreaker is `HALF_OPEN`. Default is 10                                                                                                                                                                                                                                                                                                                                                   | No       |
-| minimumNumberOfCalls                  | uint32  | The minimum number of requests which are required (per sliding window period) before the CircuitBreaker can calculate the error rate or slow requests rate. For example, if `minimumNumberOfCalls` is 10, then at least 10 requests must be recorded before the failure rate can be calculated. If only 9 requests have been recorded the CircuitBreaker will not transition to `OPEN` even if all 9 requests have failed. Default is 10 | No       |
-| maxWaitDurationInHalfOpenState        | string  | The maximum wait duration which controls the longest amount of time a CircuitBreaker could stay in `HALF_OPEN` state before it switches to `OPEN`. Value 0 means Circuit Breaker would wait infinitely in `HALF_OPEN` State until all permitted requests have been completed. Default is 0                                                                                                                                               | No       |
-| waitDurationInOpenState               | string  | The time that the CircuitBreaker should wait before transitioning from `OPEN` to `HALF_OPEN`. Default is 60s                                                                                                                                                                                                                                                                                                                             | No       |
-| failureStatusCodes                    | []int   | HTTP status codes which need to be counting as failures                                                                                                                                                                                                                                                                                                                                                                                  | No       |
+| Name                                  | Type   | Description                                                                                                                                                                                                                                                                                                                                                                                                                              | Required |
+| ------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| name                                  | string | Name of the policy. Must be unique in one CircuitBreaker configuration                                                                                                                                                                                                                                                                                                                                                                   | Yes      |
+| slidingWindowType                     | string | Type of the sliding window which is used to record the outcome of requests when the CircuitBreaker is `CLOSED`. Sliding window can either be `COUNT_BASED` or `TIME_BASED`. If the sliding window is `COUNT_BASED`, the last `slidingWindowSize` requests are recorded and aggregated. If the sliding window is `TIME_BASED`, the requests of the last `slidingWindowSize` seconds are recorded and aggregated. Default is `COUNT_BASED` | No       |
+| failureRateThreshold                  | int8   | Failure rate threshold in percentage. When the failure rate is equal to or greater than the threshold the CircuitBreaker transitions to `OPEN` and starts short-circuiting requests. Default is 50                                                                                                                                                                                                                                       | No       |
+| slowCallRateThreshold                 | int8   | Slow rate threshold in percentage. The CircuitBreaker considers a request as slow when its duration is greater than `slowCallDurationThreshold`. When the percentage of slow requests is equal to or greater than the threshold, the CircuitBreaker transitions to `OPEN` and starts short-circuiting requests. Default is 100                                                                                                           | No       |
+| countingNetworkError                  | bool   | Counting network error as failure or not. Default is false                                                                                                                                                                                                                                                                                                                                                                               | No       |
+| slidingWindowSize                     | uint32 | The size of the sliding window which is used to record the outcome of requests when the CircuitBreaker is `CLOSED`. Default is 100                                                                                                                                                                                                                                                                                                       | No       |
+| permittedNumberOfCallsInHalfOpenState | uint32 | The number of permitted requests when the CircuitBreaker is `HALF_OPEN`. Default is 10                                                                                                                                                                                                                                                                                                                                                   | No       |
+| minimumNumberOfCalls                  | uint32 | The minimum number of requests which are required (per sliding window period) before the CircuitBreaker can calculate the error rate or slow requests rate. For example, if `minimumNumberOfCalls` is 10, then at least 10 requests must be recorded before the failure rate can be calculated. If only 9 requests have been recorded the CircuitBreaker will not transition to `OPEN` even if all 9 requests have failed. Default is 10 | No       |
+| maxWaitDurationInHalfOpenState        | string | The maximum wait duration which controls the longest amount of time a CircuitBreaker could stay in `HALF_OPEN` state before it switches to `OPEN`. Value 0 means Circuit Breaker would wait infinitely in `HALF_OPEN` State until all permitted requests have been completed. Default is 0                                                                                                                                               | No       |
+| waitDurationInOpenState               | string | The time that the CircuitBreaker should wait before transitioning from `OPEN` to `HALF_OPEN`. Default is 60s                                                                                                                                                                                                                                                                                                                             | No       |
+| failureStatusCodes                    | []int  | HTTP status codes which need to be counting as failures                                                                                                                                                                                                                                                                                                                                                                                  | No       |
 
 ### ratelimiter.Policy
 
@@ -784,8 +831,8 @@ The relationship between `methods` and `url` is `AND`.
 
 | Name                 | Type    | Description                                                                                                                                                                                                                                                      | Required |
 | -------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| name                 | string  | Name of the policy. Must be unique in one CircuitBreaker configuration                                                                                                                                                                                           | Yes      |
-| countingNetworkError | boolean | Counting network error as failure or not. Default is false                                                                                                                                                                                                       | No       |
+| name                 | string  | Name of the policy. Must be unique in one Retryer configuration                                                                                                                                                                                           | Yes      |
+| countingNetworkError | bool    | Counting network error as failure or not. Default is false                                                                                                                                                                                                       | No       |
 | failureStatusCodes   | []int   | HTTP status codes which need to be counting as failures                                                                                                                                                                                                          | No       |
 | maxAttempts          | int     | The maximum number of attempts (including the initial one). Default is 3                                                                                                                                                                                         | No       |
 | waitDuration         | string  | The base wait duration between attempts. Default is 500ms                                                                                                                                                                                                        | No       |
@@ -812,7 +859,7 @@ The relationship between `methods` and `url` is `AND`.
 | Name        | Type                             | Description                                                               | Required |
 | ----------- | -------------------------------- | ------------------------------------------------------------------------- | -------- |
 | literal     | [signer.Literal](#signerLiteral) | Literal strings for customization, default value is used if omitted       | No       |
-| excludeBody | boolean                          | Exclude request body from the signature calculation, default is `false`   | No       |
+| excludeBody | bool                             | Exclude request body from the signature calculation, default is `false`   | No       |
 | ttl         | string                           | Time to live of a signature, default is 0 means a signature never expires | No       |
 | accessKeys  | map[string]string                | A map of access key id to access key secret                               | Yes      |
 
@@ -840,13 +887,13 @@ The relationship between `methods` and `url` is `AND`.
 
 ### validator.OAuth2TokenIntrospect
 
-| Name         | Type    | Description                                                                                                                                                           | Required |
-| ------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| endPoint     | string  | The endpoint of the token introspection server                                                                                                                        | Yes      |
-| clientId     | string  | Client id of Easegress in the token introspection server                                                                                                              | No       |
-| clientSecret | string  | Client secret of Easegress                                                                                                                                            | No       |
-| basicAuth    | string  | If `clientId` not specified and this option is specified, its value is used for basic authorization with the token introspection server                               | No       |
-| insecureTls  | boolean | Whether the connection between Easegress and the token introspection server need to be secure or not, default is `false` means the connection need to be a secure one | No       |
+| Name         | Type   | Description                                                                                                                                                           | Required |
+| ------------ | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| endPoint     | string | The endpoint of the token introspection server                                                                                                                        | Yes      |
+| clientId     | string | Client id of Easegress in the token introspection server                                                                                                              | No       |
+| clientSecret | string | Client secret of Easegress                                                                                                                                            | No       |
+| basicAuth    | string | If `clientId` not specified and this option is specified, its value is used for basic authorization with the token introspection server                               | No       |
+| insecureTls  | bool   | Whether the connection between Easegress and the token introspection server need to be secure or not, default is `false` means the connection need to be a secure one | No       |
 
 ### validator.OAuth2JWT
 

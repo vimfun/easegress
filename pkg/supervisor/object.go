@@ -28,10 +28,11 @@ import (
 	"sync"
 	"time"
 
+	"gopkg.in/yaml.v2"
+
 	"github.com/megaease/easegress/pkg/cluster"
 	"github.com/megaease/easegress/pkg/logger"
 	"github.com/megaease/easegress/pkg/protocol"
-	yaml "gopkg.in/yaml.v2"
 )
 
 type (
@@ -44,6 +45,7 @@ type (
 		spec       *Spec
 	}
 
+	// ObjectEntityWatcher is the watcher for object entity
 	ObjectEntityWatcher struct {
 		mutex     sync.Mutex
 		filter    ObjectEntityWatcherFilter
@@ -51,6 +53,7 @@ type (
 		eventChan chan *ObjectEntityWatcherEvent
 	}
 
+	// ObjectEntityWatcherEvent is the event for watcher
 	ObjectEntityWatcherEvent struct {
 		Delete map[string]*ObjectEntity
 		Create map[string]*ObjectEntity
@@ -85,6 +88,7 @@ const (
 	configFileName = "running_objects.yaml"
 )
 
+// FilterCategory returns a bool function to check if the object entity is filtered by category or not
 func FilterCategory(categories ...ObjectCategory) ObjectEntityWatcherFilter {
 	allCategory := false
 	for _, category := range categories {
@@ -115,13 +119,29 @@ func newObjectEntityWatcherEvent() *ObjectEntityWatcherEvent {
 	}
 }
 
-func newObjectRegistry(super *Supervisor) *ObjectRegistry {
-	syncer, err := super.Cluster().Syncer(syncInternal)
+func newObjectRegistry(super *Supervisor, initObjs map[string]string) *ObjectRegistry {
+	cls := super.Cluster()
+	prefix := cls.Layout().ConfigObjectPrefix()
+	objs, err := cls.GetPrefix(prefix)
+	if err != nil {
+		panic(fmt.Errorf("get existing objects failed: %v", err))
+	}
+	for k, v := range initObjs {
+		key := cls.Layout().ConfigObjectKey(k)
+		if _, ok := objs[key]; ok {
+			logger.Infof("initial object %s already exist in config, skip", k)
+			continue
+		}
+		if err = cls.Put(key, v); err != nil {
+			panic(fmt.Errorf("add initial object %s to config failed: %v", k, err))
+		}
+	}
+
+	syncer, err := cls.Syncer(syncInternal)
 	if err != nil {
 		panic(fmt.Errorf("get syncer failed: %v", err))
 	}
 
-	prefix := super.Cluster().Layout().ConfigObjectPrefix()
 	syncChan, err := syncer.SyncPrefix(prefix)
 	if err != nil {
 		panic(fmt.Errorf("sync prefix %s failed: %v", prefix, err))
@@ -162,16 +182,18 @@ func (or *ObjectRegistry) run() {
 
 func (or *ObjectRegistry) applyConfig(config map[string]string) {
 	or.mutex.Lock()
-	defer func() {
-		or.mutex.Unlock()
-	}()
+	defer or.mutex.Unlock()
 
-	del, create, update := make(map[string]*ObjectEntity), make(map[string]*ObjectEntity), make(map[string]*ObjectEntity)
+	var (
+		deleted = make(map[string]*ObjectEntity)
+		created = make(map[string]*ObjectEntity)
+		updated = make(map[string]*ObjectEntity)
+	)
 
 	for name, entity := range or.entities {
 		if _, exists := config[name]; !exists {
 			delete(or.entities, name)
-			del[name] = entity
+			deleted[name] = entity
 		}
 	}
 
@@ -188,9 +210,9 @@ func (or *ObjectRegistry) applyConfig(config map[string]string) {
 		}
 
 		if prevEntity != nil {
-			update[name] = entity
+			updated[name] = entity
 		} else {
-			create[name] = entity
+			created[name] = entity
 		}
 		or.entities[name] = entity
 	}
@@ -202,19 +224,19 @@ func (or *ObjectRegistry) applyConfig(config map[string]string) {
 
 			event := newObjectEntityWatcherEvent()
 
-			for name, entity := range del {
+			for name, entity := range deleted {
 				if watcher.filter(entity) {
 					event.Delete[name] = entity
 					delete(watcher.entities, name)
 				}
 			}
-			for name, entity := range create {
+			for name, entity := range created {
 				if watcher.filter(entity) {
 					event.Create[name] = entity
 					watcher.entities[name] = entity
 				}
 			}
-			for name, entity := range update {
+			for name, entity := range updated {
 				if watcher.filter(entity) {
 					event.Update[name] = entity
 					watcher.entities[name] = entity
@@ -228,6 +250,7 @@ func (or *ObjectRegistry) applyConfig(config map[string]string) {
 	}
 }
 
+// NewWatcher creates a watcher
 func (or *ObjectRegistry) NewWatcher(name string, filter ObjectEntityWatcherFilter) *ObjectEntityWatcher {
 	watcher := &ObjectEntityWatcher{
 		filter:    filter,
@@ -258,6 +281,7 @@ func (or *ObjectRegistry) NewWatcher(name string, filter ObjectEntityWatcherFilt
 	return watcher
 }
 
+// CloseWatcher closes and releases a watcher.
 func (or *ObjectRegistry) CloseWatcher(name string) {
 	or.mutex.Lock()
 	defer or.mutex.Unlock()
@@ -293,7 +317,7 @@ func (w *ObjectEntityWatcher) Watch() <-chan *ObjectEntityWatcherEvent {
 	return w.eventChan
 }
 
-// Entities returns the snapshot of the object entites of the watcher.
+// Entities returns the snapshot of the object entities of the watcher.
 func (w *ObjectEntityWatcher) Entities() map[string]*ObjectEntity {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
@@ -306,6 +330,7 @@ func (w *ObjectEntityWatcher) Entities() map[string]*ObjectEntity {
 	return entities
 }
 
+// NewObjectEntityFromConfig creates an object entity from configuration
 func (s *Supervisor) NewObjectEntityFromConfig(config string) (*ObjectEntity, error) {
 	spec, err := s.NewSpec(config)
 	if err != nil {
@@ -315,6 +340,7 @@ func (s *Supervisor) NewObjectEntityFromConfig(config string) (*ObjectEntity, er
 	return s.NewObjectEntityFromSpec(spec)
 }
 
+// NewObjectEntityFromSpec creates an object entity from a spec
 func (s *Supervisor) NewObjectEntityFromSpec(spec *Spec) (*ObjectEntity, error) {
 	registerObject, exists := objectRegistry[spec.Kind()]
 	if !exists {

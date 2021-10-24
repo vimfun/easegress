@@ -18,15 +18,17 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 
 	"github.com/go-chi/chi/v5"
-	"gopkg.in/yaml.v2"
 
 	"github.com/megaease/easegress/pkg/api"
+	"github.com/megaease/easegress/pkg/logger"
 	"github.com/megaease/easegress/pkg/object/meshcontroller/spec"
+	v1alpha1 "github.com/megaease/easemesh-api/v1alpha1"
 )
 
 type serviceInstancesByOrder []*spec.ServiceInstanceSpec
@@ -37,7 +39,7 @@ func (s serviceInstancesByOrder) Less(i, j int) bool {
 func (s serviceInstancesByOrder) Len() int      { return len(s) }
 func (s serviceInstancesByOrder) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
-func (m *API) readServiceInstanceInfo(w http.ResponseWriter, r *http.Request) (string, string, error) {
+func (a *API) readServiceInstanceInfo(w http.ResponseWriter, r *http.Request) (string, string, error) {
 	serviceName := chi.URLParam(r, "serviceName")
 	if serviceName == "" {
 		return "", "", fmt.Errorf("empty service name")
@@ -56,12 +58,23 @@ func (a *API) listServiceInstanceSpecs(w http.ResponseWriter, r *http.Request) {
 
 	sort.Sort(serviceInstancesByOrder(specs))
 
-	buff, err := yaml.Marshal(specs)
-	if err != nil {
-		panic(fmt.Errorf("marshal %#v to yaml failed: %v", specs, err))
+	var apiSpecs []*v1alpha1.ServiceInstance
+	for _, v := range specs {
+		instance := &v1alpha1.ServiceInstance{}
+		err := a.convertSpecToPB(v, instance)
+		if err != nil {
+			logger.Errorf("convert spec %#v to pb spec failed: %v", v, err)
+			continue
+		}
+		apiSpecs = append(apiSpecs, instance)
 	}
 
-	w.Header().Set("Content-Type", "text/vnd.yaml")
+	buff, err := json.Marshal(apiSpecs)
+	if err != nil {
+		panic(fmt.Errorf("marshal %#v to json failed: %v", specs, err))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(buff)
 }
 
@@ -72,22 +85,28 @@ func (a *API) getServiceInstanceSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serviceSpec := a.service.GetServiceInstanceSpec(serviceName, instanceID)
-	if serviceSpec == nil {
+	instanceSpec := a.service.GetServiceInstanceSpec(serviceName, instanceID)
+	if instanceSpec == nil {
 		api.HandleAPIError(w, r, http.StatusNotFound, fmt.Errorf("%s/%s not found", serviceName, instanceID))
 		return
 	}
 
-	buff, err := yaml.Marshal(serviceSpec)
+	pbInstanceSpec := &v1alpha1.ServiceInstance{}
+	err = a.convertSpecToPB(instanceSpec, pbInstanceSpec)
 	if err != nil {
-		panic(fmt.Errorf("marshal %#v to yaml failed: %v", serviceSpec, err))
+		panic(fmt.Errorf("convert spec %#v to pb failed: %v", instanceSpec, err))
 	}
 
-	w.Header().Set("Content-Type", "text/vnd.yaml")
+	buff, err := json.Marshal(pbInstanceSpec)
+	if err != nil {
+		panic(fmt.Errorf("marshal %#v to json failed: %v", instanceSpec, err))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(buff)
 }
 
-func (a *API) offlineSerivceInstance(w http.ResponseWriter, r *http.Request) {
+func (a *API) offlineServiceInstance(w http.ResponseWriter, r *http.Request) {
 	serviceName, instanceID, err := a.readServiceInstanceInfo(w, r)
 	if err != nil {
 		api.HandleAPIError(w, r, http.StatusBadRequest, err)

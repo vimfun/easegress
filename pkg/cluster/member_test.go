@@ -19,11 +19,14 @@ package cluster
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/phayes/freeport"
 	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
@@ -33,23 +36,25 @@ import (
 	"github.com/megaease/easegress/pkg/option"
 )
 
-const tempDir = "/tmp/eg-test"
+var (
+	memberCounter = 0
+	tempDir       = os.TempDir()
+)
 
-var memberCounter = 0
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
+func getRandomString(n int) string {
+	randBytes := make([]byte, n/2)
+	rand.Read(randBytes)
+	return fmt.Sprintf("%x", randBytes)
+}
 
 func TestMain(m *testing.M) {
-	absLogDir := filepath.Join(tempDir, "global-log")
-	os.MkdirAll(absLogDir, 0o755)
-	logger.Init(&option.Options{
-		Name:      "member-for-log",
-		AbsLogDir: absLogDir,
-	})
-
+	logger.InitNop()
+	tempDir = path.Join(tempDir, getRandomString(6))
 	code := m.Run()
-
-	logger.Sync()
-	os.RemoveAll(tempDir)
-
 	os.Exit(code)
 }
 
@@ -113,6 +118,18 @@ func mockMembers(count int) ([]*option.Options, membersSlice, []*pb.Member) {
 
 	sort.Sort(members)
 
+	tmp := members.copy()
+	if len(tmp) == 0 {
+		panic("members copy failed")
+	}
+	noexistMember := members.getByPeerURL("no-exist")
+
+	if noexistMember != nil {
+		panic("get a member not exist succ, should failed")
+	}
+
+	members.deleteByName("no-exist")
+	members.deleteByPeerURL("no-exist-purl")
 	return opts, members, pbMembers
 }
 
